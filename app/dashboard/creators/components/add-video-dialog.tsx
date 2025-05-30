@@ -16,21 +16,21 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/use-toast"
-import { getSupabaseClient } from "@/app/lib/supabase"
+import { addVideo } from "@/app/actions/video-actions"
 
 interface AddVideoDialogProps {
   children: React.ReactNode
   creatorId: string
   creatorHandle: string
+  onComplete?: () => void
 }
 
-export function AddVideoDialog({ children, creatorId, creatorHandle }: AddVideoDialogProps) {
+export function AddVideoDialog({ children, creatorId, creatorHandle, onComplete }: AddVideoDialogProps) {
   const [open, setOpen] = useState(false)
   const [videoUrl, setVideoUrl] = useState("")
   const [title, setTitle] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { toast } = useToast()
-  const supabase = getSupabaseClient()
 
   const extractVideoId = (url: string): string | null => {
     const regex = /\/video\/(\d+)/
@@ -61,20 +61,15 @@ export function AddVideoDialog({ children, creatorId, creatorHandle }: AddVideoD
     setIsSubmitting(true)
 
     try {
-      const { data, error } = await supabase
-        .from("videos")
-        .insert([
-          {
-            creator_id: creatorId,
-            url: videoUrl,
-            video_id: videoId,
-            title: title || `Video by ${creatorHandle}`,
-          },
-        ])
-        .select()
+      // Use the server action to add the video
+      const result = await addVideo({
+        creatorId,
+        videoUrl,
+        title: title || `Video by ${creatorHandle}`,
+      })
 
-      if (error) {
-        throw error
+      if (!result.success) {
+        throw new Error(result.error)
       }
 
       toast({
@@ -86,11 +81,16 @@ export function AddVideoDialog({ children, creatorId, creatorHandle }: AddVideoD
       setVideoUrl("")
       setTitle("")
       setOpen(false)
+
+      // Callback to refresh creator data
+      if (onComplete) {
+        onComplete()
+      }
     } catch (error) {
       console.error("Error adding video:", error)
       toast({
         title: "Error",
-        description: "Failed to add video. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to add video. Please try again.",
         variant: "destructive",
       })
     } finally {

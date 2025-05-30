@@ -1,67 +1,42 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { getSupabaseClient } from "@/app/lib/supabase"
+import { Button } from "@/components/ui/button"
+import { ArrowRight } from "lucide-react"
+import { fetchTopCreators } from "@/app/actions/dashboard-actions"
 
 interface Creator {
   id: string
   handle: string
-  views: number
-  league_id: string
-  league_name?: string
+  views: number // Changed from total_views
+  campaign_name: string
 }
 
 export function TopCreators() {
   const [creators, setCreators] = useState<Creator[]>([])
-  const [loading, setLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    async function fetchTopCreators() {
-      setLoading(true)
-      const supabase = getSupabaseClient()
-
+    async function loadTopCreators() {
       try {
-        // Get top creators by views
-        const { data: creatorsData, error } = await supabase
-          .from("creators")
-          .select("id, handle, views, league_id")
-          .order("views", { ascending: false })
-          .limit(5)
-
-        if (error) {
-          console.error("Error fetching creators:", error)
-          setLoading(false)
-          return
+        const result = await fetchTopCreators(5)
+        if (result.success && result.data) {
+          setCreators(result.data)
+        } else {
+          console.error("Failed to load top creators:", result.error)
         }
-
-        // Get league names for each creator
-        const creatorsWithLeagues = await Promise.all(
-          creatorsData.map(async (creator) => {
-            const { data: leagueData } = await supabase
-              .from("leagues")
-              .select("name")
-              .eq("id", creator.league_id)
-              .single()
-
-            return {
-              ...creator,
-              league_name: leagueData?.name || "Unknown Campaign",
-            }
-          }),
-        )
-
-        setCreators(creatorsWithLeagues)
       } catch (error) {
-        console.error("Error fetching top creators:", error)
+        console.error("Error loading top creators:", error)
       } finally {
-        setLoading(false)
+        setIsLoading(false)
       }
     }
 
-    fetchTopCreators()
+    loadTopCreators()
   }, [])
 
   // Format views for display
@@ -77,26 +52,34 @@ export function TopCreators() {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Top Creators</CardTitle>
-        <CardDescription>Your best performing creators by views</CardDescription>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle>Top Creators</CardTitle>
+          <CardDescription>Your best performing creators by views</CardDescription>
+        </div>
+        <Link href="/dashboard/leaderboards">
+          <Button size="sm" variant="outline">
+            View All
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Button>
+        </Link>
       </CardHeader>
       <CardContent>
-        {loading ? (
-          <div className="flex justify-center p-4">
-            <svg
-              className="animate-spin h-6 w-6 text-primary"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
+        {isLoading ? (
+          <div className="space-y-4">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-full bg-muted animate-pulse"></div>
+                  <div className="h-8 w-8 rounded-full bg-muted animate-pulse"></div>
+                  <div>
+                    <div className="h-4 w-24 bg-muted animate-pulse rounded"></div>
+                    <div className="h-3 w-16 bg-muted animate-pulse rounded mt-1"></div>
+                  </div>
+                </div>
+                <div className="h-4 w-16 bg-muted animate-pulse rounded"></div>
+              </div>
+            ))}
           </div>
         ) : creators.length === 0 ? (
           <div className="text-center p-4">
@@ -107,7 +90,11 @@ export function TopCreators() {
         ) : (
           <div className="space-y-4">
             {creators.map((creator, index) => (
-              <div key={creator.id} className="flex items-center justify-between">
+              <Link
+                key={creator.id}
+                href="/dashboard/leaderboards"
+                className="flex items-center justify-between hover:bg-muted/50 rounded-lg p-2 -m-2 transition-colors"
+              >
                 <div className="flex items-center gap-3">
                   <Badge
                     variant={index === 0 ? "default" : "outline"}
@@ -120,12 +107,22 @@ export function TopCreators() {
                   </Avatar>
                   <div>
                     <p className="text-sm font-medium">{creator.handle}</p>
-                    <p className="text-xs text-muted-foreground">{creator.league_name}</p>
+                    <p className="text-xs text-muted-foreground">{creator.campaign_name}</p>
                   </div>
                 </div>
                 <div className="text-sm font-medium">{formatViews(creator.views)} views</div>
-              </div>
+              </Link>
             ))}
+          </div>
+        )}
+        {creators.length > 0 && (
+          <div className="mt-4 pt-4 border-t">
+            <Link href="/dashboard/leaderboards">
+              <Button variant="ghost" className="w-full justify-center">
+                View Full Leaderboard
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </Link>
           </div>
         )}
       </CardContent>

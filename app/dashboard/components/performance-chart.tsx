@@ -1,37 +1,54 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChartTooltip } from "@/components/ui/chart"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Line, LineChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
+import { fetchPerformanceData } from "@/app/actions/dashboard-actions"
 
-const dailyData = [
-  { date: "Mon", views: 2400 },
-  { date: "Tue", views: 1398 },
-  { date: "Wed", views: 9800 },
-  { date: "Thu", views: 3908 },
-  { date: "Fri", views: 4800 },
-  { date: "Sat", views: 3800 },
-  { date: "Sun", views: 4300 },
-]
-
-const weeklyData = [
-  { date: "Week 1", views: 12500 },
-  { date: "Week 2", views: 18700 },
-  { date: "Week 3", views: 15400 },
-  { date: "Week 4", views: 21200 },
-]
-
-const monthlyData = [
-  { date: "Jan", views: 45000 },
-  { date: "Feb", views: 52000 },
-  { date: "Mar", views: 61000 },
-  { date: "Apr", views: 58000 },
-  { date: "May", views: 73000 },
-  { date: "Jun", views: 69000 },
-]
+type ChartData = {
+  date: string
+  views: number
+}
 
 export function PerformanceChart() {
+  const [chartData, setChartData] = useState<{
+    dailyData: ChartData[]
+    weeklyData: ChartData[]
+    monthlyData: ChartData[]
+  }>({
+    dailyData: [],
+    weeklyData: [],
+    monthlyData: [],
+  })
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    async function loadPerformanceData() {
+      try {
+        const result = await fetchPerformanceData()
+        if (result.success && result.data) {
+          setChartData(result.data)
+        } else {
+          console.error("Failed to load performance data:", result.error)
+        }
+      } catch (error) {
+        console.error("Error loading performance data:", error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadPerformanceData()
+  }, [])
+
+  // Placeholder data for loading state
+  const loadingData = Array.from({ length: 7 }, (_, i) => ({
+    date: `Day ${i + 1}`,
+    views: 0,
+  }))
+
   return (
     <Card className="w-full">
       <CardHeader className="pb-2">
@@ -50,7 +67,10 @@ export function PerformanceChart() {
           <TabsContent value="daily" className="mt-0 w-full">
             <div className="h-[300px] w-full px-2">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={dailyData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <LineChart
+                  data={isLoading ? loadingData : chartData.dailyData}
+                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                >
                   <XAxis dataKey="date" />
                   <YAxis />
                   <ChartTooltip
@@ -81,6 +101,7 @@ export function PerformanceChart() {
                     strokeWidth={2}
                     activeDot={{ r: 8 }}
                     dot={{ r: 4 }}
+                    isAnimationActive={!isLoading}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -89,7 +110,10 @@ export function PerformanceChart() {
           <TabsContent value="weekly" className="mt-0 w-full">
             <div className="h-[300px] w-full px-2">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={weeklyData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <LineChart
+                  data={isLoading ? loadingData : chartData.weeklyData}
+                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                >
                   <XAxis dataKey="date" />
                   <YAxis />
                   <ChartTooltip
@@ -120,6 +144,7 @@ export function PerformanceChart() {
                     strokeWidth={2}
                     activeDot={{ r: 8 }}
                     dot={{ r: 4 }}
+                    isAnimationActive={!isLoading}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -128,7 +153,10 @@ export function PerformanceChart() {
           <TabsContent value="monthly" className="mt-0 w-full">
             <div className="h-[300px] w-full px-2">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={monthlyData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <LineChart
+                  data={isLoading ? loadingData : chartData.monthlyData}
+                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                >
                   <XAxis dataKey="date" />
                   <YAxis />
                   <ChartTooltip
@@ -159,6 +187,7 @@ export function PerformanceChart() {
                     strokeWidth={2}
                     activeDot={{ r: 8 }}
                     dot={{ r: 4 }}
+                    isAnimationActive={!isLoading}
                   />
                 </LineChart>
               </ResponsiveContainer>

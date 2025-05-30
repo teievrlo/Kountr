@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/use-toast"
 import { getSupabaseClient } from "@/app/lib/supabase"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { addCreator } from "@/app/actions/creator-actions"
 
 interface Campaign {
   id: string
@@ -26,9 +27,10 @@ interface Campaign {
 
 interface AddCreatorDialogProps {
   children: React.ReactNode
+  onCreatorAdded?: () => void
 }
 
-export function AddCreatorDialog({ children }: AddCreatorDialogProps) {
+export function AddCreatorDialog({ children, onCreatorAdded }: AddCreatorDialogProps) {
   const [open, setOpen] = useState(false)
   const [handle, setHandle] = useState("")
   const [videoUrl, setVideoUrl] = useState("")
@@ -86,22 +88,14 @@ export function AddCreatorDialog({ children }: AddCreatorDialogProps) {
     setIsSubmitting(true)
 
     try {
-      // Format handle to ensure it starts with @
-      const formattedHandle = handle.startsWith("@") ? handle : `@${handle}`
+      const result = await addCreator({
+        handle: handle.trim(),
+        leagueId: campaignId,
+        videoUrl: videoUrl.trim() || undefined,
+      })
 
-      const { data, error } = await supabase
-        .from("creators")
-        .insert([
-          {
-            handle: formattedHandle,
-            league_id: campaignId,
-            video_url: videoUrl || null,
-          },
-        ])
-        .select()
-
-      if (error) {
-        throw error
+      if (!result.success) {
+        throw new Error(result.error)
       }
 
       toast({
@@ -114,11 +108,16 @@ export function AddCreatorDialog({ children }: AddCreatorDialogProps) {
       setVideoUrl("")
       setCampaignId("")
       setOpen(false)
+
+      // Callback to refresh creators list
+      if (onCreatorAdded) {
+        onCreatorAdded()
+      }
     } catch (error) {
       console.error("Error adding creator:", error)
       toast({
         title: "Error",
-        description: "Failed to add creator. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to add creator. Please try again.",
         variant: "destructive",
       })
     } finally {

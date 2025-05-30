@@ -17,7 +17,9 @@ export default function CampaignsPage() {
             </Button>
           </AddCampaignDialog>
         </DashboardHeader>
-        <CampaignsList />
+        <div className="mt-8">
+          <CampaignsList />
+        </div>
       </div>
     </DashboardShell>
   )

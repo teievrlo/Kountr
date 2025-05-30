@@ -13,6 +13,8 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 
 // cron entry point
 ;(async () => {
+  console.log("Starting scraper...")
+
   // First, get videos that need to be updated
   const { data: videos } = await supabase
     .from("videos")
@@ -25,15 +27,53 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
   // Process each video
   for (const video of videos || []) {
     try {
-      const views = await scrapeViews(video.url)
-      if (views !== null) {
-        // Update video views
-        await supabase.from("videos").update({ views, last_checked: new Date().toISOString() }).eq("id", video.id)
+      const previousViews = video.views || 0
+      const newViews = await scrapeViews(video.video_url)
 
-        console.log(`Updated video ${video.id} with ${views} views`)
+      if (newViews !== null) {
+        // Update video views
+        await supabase
+          .from("videos")
+          .update({
+            views: newViews,
+            last_checked: new Date().toISOString(),
+          })
+          .eq("id", video.id)
+
+        // Log the scrape result
+        await supabase.from("scrape_logs").insert({
+          video_id: video.id,
+          previous_views: previousViews,
+          new_views: newViews,
+          status: "success",
+        })
+
+        console.log(
+          `Updated video ${video.id}: ${previousViews} -> ${newViews} views (${newViews - previousViews > 0 ? "+" : ""}${newViews - previousViews})`,
+        )
+      } else {
+        // Log failed scrape
+        await supabase.from("scrape_logs").insert({
+          video_id: video.id,
+          previous_views: previousViews,
+          new_views: previousViews, // Keep same views if scrape failed
+          status: "failed",
+          error_message: "Failed to scrape views",
+        })
+
+        console.log(`Failed to scrape video ${video.id}`)
       }
     } catch (error) {
       console.error(`Error processing video ${video.id}:`, error)
+
+      // Log error
+      await supabase.from("scrape_logs").insert({
+        video_id: video.id,
+        previous_views: video.views || 0,
+        new_views: video.views || 0,
+        status: "error",
+        error_message: error.message,
+      })
     }
   }
 
@@ -54,7 +94,9 @@ async function scrapeViews(url, tries = 0) {
   await page.authenticate({ username: user, password: pass })
 
   try {
-    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)…")
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    )
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 })
     await page.waitForTimeout(2500)
     const html = await page.content()

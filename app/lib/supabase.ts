@@ -28,7 +28,7 @@ export type Campaign = {
 export type Video = {
   id: string
   creator_id: string
-  url: string
+  video_url: string // Changed from url to video_url to match the database schema
   title: string
   description?: string
   thumbnail_url?: string

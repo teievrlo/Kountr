@@ -1,10 +1,13 @@
 "use client"
 
-import { useAppContext } from "@/app/context/app-provider"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { useEffect, useState } from "react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { MoreHorizontal, RefreshCw, Trash2, Search, Filter } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,30 +17,130 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { getSupabaseClient } from "@/app/lib/supabase"
+import { AddVideoDialog } from "./add-video-dialog"
+import { DeleteCreatorDialog } from "./delete-creator-dialog"
 import { useToast } from "@/components/ui/use-toast"
-import { Eye, MoreHorizontal, RefreshCw, Video } from "lucide-react"
-import { useState } from "react"
-import { AddVideosDialog } from "./add-videos-dialog"
 
-interface CreatorsTableProps {
-  campaign: string
+interface Creator {
+  id: string
+  handle: string
+  views: number
+  league_id: string
+  league_name?: string
+  last_checked: string
+  video_count?: number
 }
 
-export function CreatorsTable({ campaign }: CreatorsTableProps) {
-  const { creators, videos, refreshCreatorData } = useAppContext()
-  const { toast } = useToast()
+interface Campaign {
+  id: string
+  name: string
+}
+
+export function CreatorsTable() {
+  const [creators, setCreators] = useState<Creator[]>([])
+  const [filteredCreators, setFilteredCreators] = useState<Creator[]>([])
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({})
-  const [selectedCreators, setSelectedCreators] = useState<string[]>([])
+  const [searchTerm, setSearchTerm] = useState("")
+  const [selectedCampaign, setSelectedCampaign] = useState<string>("all")
+  const supabase = getSupabaseClient()
+  const { toast } = useToast()
 
-  // Filter creators by campaign if a specific one is selected
-  const filteredCreators = campaign === "all" ? creators : creators.filter((creator) => creator.campaign === campaign)
+  const fetchCreators = async () => {
+    setLoading(true)
 
-  // Sort creators by views (highest first)
-  const sortedCreators = [...filteredCreators].sort((a, b) => b.totalViews - a.totalViews)
+    try {
+      // Get creators
+      const { data: creatorsData, error } = await supabase
+        .from("creators")
+        .select("id, handle, views, league_id, last_checked")
+        .order("views", { ascending: false })
 
-  // Get videos for a specific creator
-  const getCreatorVideos = (creatorId: string) => {
-    return videos.filter((video) => video.creatorId === creatorId)
+      if (error) {
+        console.error("Error fetching creators:", error)
+        setLoading(false)
+        return
+      }
+
+      // Get campaigns
+      const { data: campaignsData } = await supabase.from("leagues").select("id, name").order("name")
+
+      setCampaigns(campaignsData || [])
+
+      // Get league names and video counts for each creator
+      const creatorsWithDetails = await Promise.all(
+        creatorsData.map(async (creator) => {
+          // Get league name
+          const { data: leagueData } = await supabase
+            .from("leagues")
+            .select("name")
+            .eq("id", creator.league_id)
+            .single()
+
+          // Get video count
+          const { count } = await supabase
+            .from("videos")
+            .select("*", { count: "exact", head: true })
+            .eq("creator_id", creator.id)
+
+          return {
+            ...creator,
+            league_name: leagueData?.name || "Unknown Campaign",
+            video_count: count || 0,
+          }
+        }),
+      )
+
+      setCreators(creatorsWithDetails)
+      setFilteredCreators(creatorsWithDetails)
+    } catch (error) {
+      console.error("Error fetching creators:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load creators. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchCreators()
+  }, [supabase])
+
+  // Filter creators based on search and campaign
+  useEffect(() => {
+    let filtered = creators
+
+    // Filter by search term
+    if (searchTerm) {
+      filtered = filtered.filter(
+        (creator) =>
+          creator.handle.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          creator.league_name?.toLowerCase().includes(searchTerm.toLowerCase()),
+      )
+    }
+
+    // Filter by campaign
+    if (selectedCampaign !== "all") {
+      filtered = filtered.filter((creator) => creator.league_id === selectedCampaign)
+    }
+
+    setFilteredCreators(filtered)
+  }, [creators, searchTerm, selectedCampaign])
+
+  // Format views for display
+  const formatViews = (views: number) => {
+    if (views >= 1000000) {
+      return `${(views / 1000000).toFixed(1)}M`
+    }
+    if (views >= 1000) {
+      return `${(views / 1000).toFixed(1)}K`
+    }
+    return views.toString()
   }
 
   // Refresh creator data
@@ -45,18 +148,22 @@ export function CreatorsTable({ campaign }: CreatorsTableProps) {
     setRefreshing((prev) => ({ ...prev, [creatorId]: true }))
 
     try {
-      await refreshCreatorData(creatorId)
+      // Update last_checked timestamp
+      await supabase.from("creators").update({ last_checked: new Date().toISOString() }).eq("id", creatorId)
+
+      // In a real app, this would trigger a scrape of the creator's videos
+      // For now, we'll just refresh the data
+      await fetchCreators()
 
       toast({
-        title: "Data Refreshed",
-        description: "Creator data has been updated successfully.",
+        title: "Creator refreshed",
+        description: "Creator data has been refreshed successfully.",
       })
     } catch (error) {
-      console.error("Error refreshing creator data:", error)
-
+      console.error("Error refreshing creator:", error)
       toast({
-        title: "Refresh Failed",
-        description: "There was an error refreshing the creator data.",
+        title: "Error",
+        description: "Failed to refresh creator data. Please try again.",
         variant: "destructive",
       })
     } finally {
@@ -64,170 +171,177 @@ export function CreatorsTable({ campaign }: CreatorsTableProps) {
     }
   }
 
-  // Toggle row selection
-  const toggleRowSelection = (creatorId: string) => {
-    setSelectedCreators((prev) => {
-      if (prev.includes(creatorId)) {
-        return prev.filter((id) => id !== creatorId)
-      } else {
-        return [...prev, creatorId]
-      }
-    })
-  }
-
-  // Toggle all rows selection
-  const toggleAllRows = () => {
-    if (selectedCreators.length === sortedCreators.length) {
-      setSelectedCreators([])
-    } else {
-      setSelectedCreators(sortedCreators.map((creator) => creator.id))
-    }
-  }
-
   return (
-    <div className="h-full flex flex-col w-full">
-      {selectedCreators.length > 0 && (
-        <div className="bg-muted/50 p-2 flex items-center justify-between w-full">
-          <div className="text-sm font-medium">
-            {selectedCreators.length} creator{selectedCreators.length > 1 ? "s" : ""} selected
+    <Card>
+      <CardHeader>
+        <CardTitle>Creators Table</CardTitle>
+        <CardDescription>Detailed view of all creators with filtering and search</CardDescription>
+
+        {/* Filters */}
+        <div className="flex gap-4 pt-4">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search creators or campaigns..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
           </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline">
-              Add to Campaign
-            </Button>
-            <Button size="sm" variant="outline" className="text-red-500 hover:text-red-600">
-              Remove
-            </Button>
-          </div>
+          <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
+            <SelectTrigger className="w-[200px]">
+              <Filter className="mr-2 h-4 w-4" />
+              <SelectValue placeholder="Filter by campaign" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Campaigns</SelectItem>
+              {campaigns.map((campaign) => (
+                <SelectItem key={campaign.id} value={campaign.id}>
+                  {campaign.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      )}
-      <div className="overflow-auto flex-1 w-full">
-        <div className="min-w-full">
-          <Table className="w-full">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[40px]">
-                  <Checkbox
-                    checked={selectedCreators.length === sortedCreators.length && sortedCreators.length > 0}
-                    onCheckedChange={toggleAllRows}
-                    aria-label="Select all"
-                  />
-                </TableHead>
-                <TableHead>Creator</TableHead>
-                <TableHead className="hidden md:table-cell">Campaign</TableHead>
-                <TableHead className="hidden sm:table-cell">Videos</TableHead>
-                <TableHead>Views</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sortedCreators.length > 0 ? (
-                sortedCreators.map((creator) => {
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="flex justify-center p-8">
+            <svg
+              className="animate-spin h-6 w-6 text-primary"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+          </div>
+        ) : filteredCreators.length === 0 ? (
+          <div className="text-center p-8">
+            <p className="text-sm text-muted-foreground mb-4">
+              {creators.length === 0
+                ? "No creators found. Add creators to get started."
+                : "No creators match your search criteria."}
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Creator</TableHead>
+                  <TableHead>Campaign</TableHead>
+                  <TableHead className="text-right">Views</TableHead>
+                  <TableHead className="text-right">Videos</TableHead>
+                  <TableHead>Last Updated</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredCreators.map((creator) => {
                   const isRefreshing = refreshing[creator.id] || false
-                  const creatorVideos = getCreatorVideos(creator.id)
-                  const isSelected = selectedCreators.includes(creator.id)
 
                   return (
-                    <TableRow key={creator.id} className={isSelected ? "bg-muted/50" : undefined}>
-                      <TableCell>
-                        <Checkbox
-                          checked={isSelected}
-                          onCheckedChange={() => toggleRowSelection(creator.id)}
-                          aria-label={`Select ${creator.handle}`}
-                        />
-                      </TableCell>
+                    <TableRow key={creator.id}>
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar className="h-8 w-8">
-                            <AvatarImage src={creator.avatar || "/placeholder.svg"} alt={creator.name} />
-                            <AvatarFallback>{creator.initials}</AvatarFallback>
+                            <AvatarFallback className="text-xs">
+                              {creator.handle.substring(0, 2).toUpperCase()}
+                            </AvatarFallback>
                           </Avatar>
-                          <div>
-                            <div className="font-medium flex items-center">
-                              {creator.handle}
-                              {creator.isVerified && (
-                                <Badge
-                                  variant="outline"
-                                  className="ml-2 bg-blue-50 text-blue-700 hover:bg-blue-50 hidden sm:inline-flex"
-                                >
-                                  Verified
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="text-xs text-muted-foreground">{creator.name}</div>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell">
-                        <Badge variant="outline">{creator.campaign}</Badge>
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell">
-                        <div className="flex items-center gap-1">
-                          <Video className="h-4 w-4 text-muted-foreground" />
-                          <span>{creator.videoCount}</span>
+                          <span className="font-medium">{creator.handle}</span>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Eye className="h-4 w-4 text-muted-foreground" />
-                          <span>
-                            {creator.totalViews >= 1000
-                              ? `${(creator.totalViews / 1000).toFixed(1)}K`
-                              : creator.totalViews.toLocaleString()}
-                          </span>
-                        </div>
+                        <Badge variant="outline">{creator.league_name}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-medium">{formatViews(creator.views)}</TableCell>
+                      <TableCell className="text-right">{creator.video_count}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {new Date(creator.last_checked).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
+                        <div className="flex items-center justify-end gap-2">
                           <Button
-                            variant="ghost"
-                            size="icon"
+                            variant="outline"
+                            size="sm"
                             onClick={() => handleRefreshCreator(creator.id)}
                             disabled={isRefreshing}
-                            className="h-7 w-7"
                           >
-                            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
-                            <span className="sr-only">Refresh</span>
+                            <RefreshCw className={`h-3 w-3 ${isRefreshing ? "animate-spin" : ""}`} />
                           </Button>
-                          <AddVideosDialog creator={creator}>
-                            <Button variant="ghost" size="icon" className="h-7 w-7">
-                              <Video className="h-3.5 w-3.5" />
-                              <span className="sr-only">Add Videos</span>
+                          <AddVideoDialog
+                            creatorId={creator.id}
+                            creatorHandle={creator.handle}
+                            onComplete={fetchCreators}
+                          >
+                            <Button variant="outline" size="sm">
+                              Add Video
                             </Button>
-                          </AddVideosDialog>
+                          </AddVideoDialog>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-7 w-7">
-                                <MoreHorizontal className="h-3.5 w-3.5" />
-                                <span className="sr-only">Open menu</span>
+                              <Button variant="ghost" size="sm">
+                                <MoreHorizontal className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                              <DropdownMenuItem>View Profile</DropdownMenuItem>
-                              <DropdownMenuItem>Edit Details</DropdownMenuItem>
+                              <DropdownMenuItem>View Details</DropdownMenuItem>
+                              <DropdownMenuItem>Edit Creator</DropdownMenuItem>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem>Change Campaign</DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem className="text-red-600">Remove Creator</DropdownMenuItem>
+                              <DeleteCreatorDialog
+                                creatorId={creator.id}
+                                creatorHandle={creator.handle}
+                                onCreatorDeleted={fetchCreators}
+                              >
+                                <DropdownMenuItem
+                                  className="text-red-600 focus:text-red-600"
+                                  onSelect={(e) => e.preventDefault()}
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete Creator
+                                </DropdownMenuItem>
+                              </DeleteCreatorDialog>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
                       </TableCell>
                     </TableRow>
                   )
-                })
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center">
-                    No creators found for this campaign.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-    </div>
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+
+        {/* Results summary */}
+        {!loading && (
+          <div className="flex items-center justify-between pt-4 text-sm text-muted-foreground">
+            <span>
+              Showing {filteredCreators.length} of {creators.length} creators
+            </span>
+            {(searchTerm || selectedCampaign !== "all") && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearchTerm("")
+                  setSelectedCampaign("all")
+                }}
+              >
+                Clear filters
+              </Button>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
